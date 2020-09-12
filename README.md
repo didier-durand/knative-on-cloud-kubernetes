@@ -99,10 +99,9 @@ and Google GCP datacenters because hey is run on GitHub while Knative is hosted 
 
 To fork and run this project in your own Github account, you only need to:
 
-- create a test project in your GCP account and define it as a Github secret named ${{ secrets.GCP_PROJECT }} in workflow YAML.
-- define a service account with Project Owner role (to make security definitions simpler), download its secret key and define the value of a Github
- secret named ${{ secrets.GCP_PROJECT }} with the downloaded json
-
+- **GCP**: Create a test project in your GCP account and define it as a Github secret named ${{ secrets.GCP_PROJECT }} in workflow YAML. Define a service account in GCP IAM with Project Owner role (to make security definitions simpler), download its secret key and define the value of a Github
+ secret named ${{ secrets.GCP_SA_KEY }} with the downloaded json.
+- **AWS**: Define a user in AWS IAM with full admin rights (to make security definitions simpler), download its access key and secret key to define 2 secrets ${{ secrets.AWS_ACCESS_KEY_ID }} and ${{ secrets.AWS_SECRET_KEY }}. Finally, define the region that you want to work in as ${{ secrets.AWS_REGION }}
 ## Scalability test
 
 See above for some comments
