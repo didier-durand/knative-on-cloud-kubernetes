@@ -15,7 +15,7 @@ on:
     - cron:  '0 1 * * THU' 
 
 env:
-  GITHUB_REPO: 'knative-on-cloud-kubernetes-private'
+  GITHUB_REPO: 'knative-on-cloud-kubernetes'
   # action can contain 'create', 'delete' or 'create-delete'
   EKS_ACTION: create-delete
   EKS_CLUSTER: test-knative-cluster
