@@ -10,9 +10,6 @@ on:
     paths: 
     - '!.github/workflows/**'
     - '.github/workflows/aws-eks-knative.yml'
-     
-  schedule:
-    - cron:  '0 1 * * THU' 
 
 env:
   GITHUB_REPO: 'knative-on-cloud-kubernetes'
@@ -211,8 +208,8 @@ jobs:
     
     - name: Unit test for services
       run: |- 
-        # some time may be needed to propagate new DNS entries
-        sleep 30s 
+        # some time may be needed to propagate new DNS entries and IP adresses
+        sleep 60s 
         #
         export SERVICE_URL=$(kubectl get ksvc helloworld-go | grep helloworld-go | awk '{print $2}')
         echo "service url: $SERVICE_URL"
