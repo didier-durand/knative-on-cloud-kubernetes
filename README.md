@@ -20,9 +20,13 @@ essential to **build modern, source-centric, and container-based applications th
 third-party data center**. Each of the components under the Knative project attempt to identify common patterns and codify the best practices 
 that are shared by successful, real-world, Kubernetes-based frameworks and applications.*".
 
-So, two different containers are deployed on Knative: their proper execution is validated. The *[ealen/echo server](https://hub.docker.com/r/ealen/echo-server)* 
-Docker image allows an end-to-end check via a specific http request/response dialog while *[helloworld-go](https://knative.dev/v0.15-docs/serving/samples/hello-world/helloworld-go/)* 
-Docker image is limited to a unique response.
+So, two different containers are deployed on Knative: their proper execution is validated. The *[autoscale-go](https://knative.dev/v0.16-docs/serving/autoscaling/autoscale-go/)* 
+image allows requests with parameters to consume more or less cpu and  memory check via query specific query parameters while 
+*[helloworld-go](https://knative.dev/v0.17-docs/serving/samples/hello-world/helloworld-go/)* Docker image is limited to a unique and trivial 
+response. We deploy helloworld-go with official [Knative client (kn)](https://github.com/knative/client) with minimal command-line options 
+to demonstrate as easy as it can get for the developer: *'kn service create <SERVICE_NAME> --image-nname <IMAGE_NAME> --env <ENV_VARS_TO_SET>'*. 
+But, a rich set of deployment options is provided as per [reference documentation](https://github.com/knative/client/blob/master/docs/cmd/kn_service_create.md). 
+The autoscale-go service is deployed via a YAML file describing a Knative service.
 
 The outcome of the recurring executions of the workflow and all the messages produced by those runs can be checked in the [Actions tab](https://github.com/didier-durand/knative-on-cloud-kubernetes-private/actions)
  of this repository. Also, the logs of any execution can be downloaded as text files via "download log archive" of the job dashboard for 
