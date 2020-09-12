@@ -1,0 +1,284 @@
+name: Deploy Knative on EKS 
+
+on: 
+
+  workflow_dispatch:
+    inputs:
+  
+  push:
+    #protection to avoid triggering when other workflow is modified
+    paths: 
+    - '!.github/workflows/**'
+    - '.github/workflows/aws-eks-knative.yml'
+     
+  schedule:
+    - cron:  '0 1 * * THU' 
+
+env:
+  GITHUB_REPO: 'knative-on-cloud-kubernetes-private'
+  # action can contain 'create', 'delete' or 'create-delete'
+  EKS_ACTION: create-delete
+  EKS_CLUSTER: test-knative-cluster
+  EKS_NODES: test-knative-nodes
+  EKS_CONFIG: cluster-config.yaml
+  #KN_VERSION: v0.17.0
+  KN_VERSION: 0.17
+  
+jobs:
+  create-kubernetes-cluster:
+    name: Create Kubernetes cluster
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v2
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v1
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ secrets.AWS_REGION }}
+        
+    - name: Install v2 and check aws CLI version
+      # Github currently (Aug 2020) runs on aws CLI v1
+      run: |-
+        curl -s "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+        unzip -q awscliv2.zip
+        sudo ./aws/install
+        export AWS_VERSION=$(aws --version)
+        echo "AWS_VERSION: $AWS_VERSION)"
+        grep -q "aws-cli/2." <<< $AWS_VERSION
+        # add install
+        curl --silent --location "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz" | tar xz -C /tmp
+        sudo mv /tmp/eksctl /usr/local/bin
+        echo "EKSCTL_VERSION: $(eksctl version)"
+        
+    - name: Create config
+      run: |-
+        cp "eks/$EKS_CONFIG" "./$EKS_CONFIG"
+        echo " "
+        ls -l "eks/$EKS_CONFIG"
+        ls -l "./$EKS_CONFIG"
+        echo -e "\nconfig before:"
+        cat "./$EKS_CONFIG"
+        sed -i "s/<<EKS_NODES>>/$EKS_NODES/" "./$EKS_CONFIG"
+        sed -i "s/<<EKS_CLUSTER>>/$EKS_CLUSTER/" "./$EKS_CONFIG"
+        sed -i "s/<<AWS_REGION>>/${{ secrets.AWS_REGION }}/" "./$EKS_CONFIG"
+        echo -e "\nconfig after:"
+        cat "./$EKS_CONFIG"
+    
+    - name: Create EKS cluster
+      run: |-
+        echo "list clusters:"
+        aws eks list-clusters
+        if [[ $EKS_ACTION == *"create"* ]]
+        then
+          echo "create cluster:"
+          eksctl delete cluster -f "./$EKS_CONFIG" || true
+          eksctl create cluster -f "./$EKS_CONFIG"
+          echo "update cluster logging:" 
+          eksctl utils update-cluster-logging --enable-types all --approve --cluster $EKS_CLUSTER --region ${{ secrets.AWS_REGION }}  
+          echo "describe cluster stacks:" 
+          eksctl utils describe-stacks --cluster $EKS_CLUSTER --region ${{ secrets.AWS_REGION }}
+          echo "describe cluster:"
+          aws eks describe-cluster --name $EKS_CLUSTER
+          echo "get nodegroup:"
+          eksctl get nodegroup --cluster=$EKS_CLUSTER
+          echo "list clusters:"
+          aws eks list-clusters
+        fi
+     
+    - name: Generate kubeconfig for kubectl
+      run: |-
+        aws eks update-kubeconfig --name $EKS_CLUSTER --region ${{ secrets.AWS_REGION }}
+        kubectl get services --all-namespaces
+        
+    - name: Get version via kubectl
+      run: |-
+        kubectl version
+        
+    - name: Install Istio Operator via istioctl
+      run: |-
+        echo "create ns istio-system" 
+        kubectl create ns istio-system
+        curl -L https://istio.io/downloadIstio | ISTIO_VERSION=1.7.0 sh -
+        export PATH="$PATH:/home/runner/work/$GITHUB_REPO/$GITHUB_REPO/istio-1.7.0/bin"
+        echo "istioctl version: $(istioctl version --remote=false)"
+        istioctl operator init
+        echo "apply istio-operator.yaml" 
+        kubectl apply -f istio/istio-operator.yaml
+        # wait a bit for istio services to come up...
+        sleep 60s
+        # check proper install
+        echo "istio services:" 
+        kubectl get services -n istio-system
+        kubectl get services -n istio-system | (grep 'istio-ingressgateway.*LoadBalancer' && echo 'servicei stio-ingressgateway ok')
+        kubectl get services -n istio-system | (grep 'istiod.*ClusterIP' && echo 'service istiod ok')
+        kubectl get services -n istio-system | ((wc -l | grep 3) && echo 'no unexpected service')
+        echo "istio pods:" 
+        kubectl get pods -n istio-system
+        kubectl get pods -n istio-system | (grep 'istio-ingressgateway.*Running' && echo 'pod istio-ingressgateway ok')
+        kubectl get pods -n istio-system | (grep 'istiod.*Running' && echo 'pod istiod ok')
+        kubectl get pods -n istio-system | ((wc -l | grep 3) && echo 'no unexpected pod')
+       
+    # https://knative.dev/docs/install/index.html
+    - name: Install the Custom Resource Definitions for Knative Serving features
+      run: |-
+        kubectl apply --filename https://github.com/knative/serving/releases/download/v$KN_VERSION.0/serving-crds.yaml
+        
+    - name: Install the core components for Knative Serving features
+      run: |-
+        kubectl apply --filename https://github.com/knative/serving/releases/download/v$KN_VERSION.0/serving-core.yaml
+        
+    - name: Install the Knative istio gatewway & add xip.io DNS for interactions with deployed workloads from public internet
+      run: |-
+        # some wait is needed or controller install may fail
+        sleep 60s
+        #
+        echo "kubectl get namespaces: "
+        kubectl get namespaces
+        echo "kubectl api resources: "
+        kubectl api-resources
+        echo "kubectl apply net-istio version: "
+        kubectl apply --filename https://github.com/knative/net-istio/releases/download/v$KN_VERSION.0/release.yaml
+        #install xip.io
+        kubectl apply --filename https://github.com/knative/serving/releases/download/v$KN_VERSION.0/serving-default-domain.yaml
+        
+    - name: Install knative client (kn)
+      run: |-
+        curl --output kn https://storage.googleapis.com/knative-nightly/client/latest/kn-linux-amd64
+        chmod ugo+x kn
+        
+    - name: Check if knative is running properly
+      run: |-
+        # wait a bit for knative to come up fully...
+        sleep 60s
+        #check presence of expected namespace knative-serving
+        kubectl get namespaces | grep 'knative-serving'
+        #check presence of expected services in namespace knative-serving
+        echo "kubectl get services -n knative-serving: "  
+        kubectl get services -n knative-serving
+        kubectl get services -n knative-serving | (grep 'activator-service.*ClusterIP' && echo 'activator-service ok')
+        kubectl get services -n knative-serving | (grep 'autoscaler.*ClusterIP' && echo 'autoscaler ok')
+        kubectl get services -n knative-serving | (grep 'controller.*ClusterIP' && echo 'controller ok')
+        kubectl get services -n knative-serving | (grep 'istio-webhook.*ClusterIP' && echo 'istio-webhook ok')
+        kubectl get services -n knative-serving | (grep 'webhook.*ClusterIP' && echo 'webhook ok')
+        kubectl get services -n knative-serving | (grep 'default-domain-service.*ClusterIP' && echo 'deault-domain-service ok')
+        kubectl get services -n knative-serving | ((wc -l | grep 7) && echo 'no unexpected service')
+        #check presence of expected pods in namespace knative-serving
+        echo "kubectl get pods -n knative-serving: "
+        kubectl get pods -n knative-serving
+        kubectl get pods -n knative-serving | (grep 'activator-.*Running' && echo 'activator pod ok')
+        kubectl get pods -n knative-serving | (grep 'autoscaler-.*Running' && echo 'autoscaler pod ok')
+        kubectl get pods -n knative-serving | (grep 'controller-.*Running' && echo 'controller pod ok')
+        kubectl get pods -n knative-serving | (grep 'default-domain-.*Completed' && echo 'default-domain pod ok')
+        kubectl get pods -n knative-serving | (grep 'istio-webhook-.*Running' && echo 'istio-webhook pod ok')
+        kubectl get pods -n knative-serving | (grep 'networking-istio-.*Running' && echo 'networking-istio pod ok')
+        kubectl get pods -n knative-serving | (grep 'webhook-.*Running' && echo 'istio-webhook pod ok')
+        kubectl get pods -n knative-serving | ((wc -l | grep 8) && echo 'no unexpected pod')
+        
+    - name: Deploy helloworld-go service
+      run: |-
+        # helloworld-go
+        ./kn service delete helloworld-go || true
+        ./kn service create helloworld-go --image gcr.io/knative-samples/helloworld-go --env TARGET="Go Sample v1" 
+        echo "kn service desribe for helloworld-go: "
+        ./kn service describe helloworld-go
+        #check proper deployment
+        echo 'kubectl get services -n default: '
+        kubectl get services -n default
+        kubectl get services -n default | (grep 'helloworld-go.*ClusterIP' && echo 'helloworld-go check 1 ok')
+        kubectl get services -n default | (grep 'helloworld-go-.*ClusterIP' && echo 'helloworld-go check 2 ok')
+        kubectl get services -n default | (grep 'helloworld-go-.*private.*ClusterIP' && echo 'helloworld-go check 3 ok')
+        kubectl get services -n default | (grep 'helloworld-go' | wc -l | grep 3 && echo 'no expected service for helloworld-go')
+        #autoscale-go
+        kubectl delete -f https://raw.githubusercontent.com/knative/docs/release-$KN_VERSION/docs/serving/autoscaling/autoscale-go/service.yaml || true
+        kubectl apply -f https://raw.githubusercontent.com/knative/docs/release-$KN_VERSION/docs/serving/autoscaling/autoscale-go/service.yaml
+        echo "kn service desribe for autoscale-go: "
+        ./kn service describe autoscale-go
+        #check proper deployment
+        echo "kubectl get services -n default: "
+        kubectl get services -n default
+        kubectl get services -n default | (grep 'autoscale-go-.*ClusterIP' && echo 'autoscale-go check 1 ok')
+        kubectl get services -n default | (grep 'autoscale-go-.*private.*ClusterIP' && echo 'autoscale-go check 2 ok')
+        kubectl get services -n default | (grep 'autoscale-go' | wc -l | grep 2 && echo 'no expected service for autoscale-go')
+        
+        
+    - name: Grant (wide...) auths
+      run: |-  
+        kubectl create clusterrolebinding anonymous-cluster-admin-binding --clusterrole=cluster-admin --user=system:anonymous || true
+    
+    - name: Unit test for services
+      run: |- 
+        # some time may be needed to propagate new DNS entries
+        sleep 30s 
+        #
+        export SERVICE_URL=$(kubectl get ksvc helloworld-go | grep helloworld-go | awk '{print $2}')
+        echo "service url: $SERVICE_URL"
+        export SERVICE_DNS=$(echo "$SERVICE_URL" | sed -e 's/^http:\/\///g' -e 's/^https:\/\///g')
+        echo "service dns: $SERVICE_DNS"
+        while [[ $(nslookup "$SERVICE_DNS") == *'NXDOMAIN'* ]]
+        do
+          echo "sleep 5s for nslookup |$SERVICE_DNS|"
+          sleep 5s
+        done
+        nslookup "$SERVICE_DNS"
+        curl --insecure "$SERVICE_URL"
+        #
+        export SERVICE_URL=$(kubectl get ksvc autoscale-go | grep autoscale-go | awk '{print $2}')
+        echo "service url: $SERVICE_URL"
+        export SERVICE_DNS=$(echo $SERVICE_URL | sed -e 's/^http:\/\///g' -e 's/^https:\/\///g')
+        echo "service dns: $SERVICE_DNS"
+        while [[ $(nslookup "$SERVICE_DNS") == *'NXDOMAIN'* ]]
+        do
+          echo "sleep 5s for nslookup |$SERVICE_DNS|"
+          sleep 5s
+        done
+        nslookup "$SERVICE_DNS"
+        curl --insecure "$SERVICE_URL/sleep=10&prime=100&bloat=1"
+    
+    - name: Install hey 
+      run: |-
+        curl --output hey https://storage.googleapis.com/hey-release/hey_linux_amd64
+        chmod ugo+x ./hey
+        
+    - name: Run helloworld-go with max throughput via hey
+      run: |-
+        export SERVICE_URL=$(kubectl get ksvc helloworld-go | grep helloworld-go | awk '{print $2}')
+        echo "get pods [before]: "
+        kubectl get pods -n default
+        echo "service url: $SERVICE_URL"
+        echo "run hey:"
+        ./hey -n 200000 "$SERVICE_URL" 
+        echo "get pods [after]: "
+        kubectl get pods -n default
+        
+    - name: Activate Knative autoscaling for autoscale-go via hey
+      run: |-
+        export SERVICE_URL=$(kubectl get ksvc autoscale-go | grep autoscale-go | awk '{print $2}')
+        echo "get pods [before]: "
+        kubectl get pods -n default
+        echo "service url: $SERVICE_URL"
+        echo "run hey:"
+        ./hey -z 90s -q 350 "$SERVICE_URL?sleep=100&prime=10000&bloat=5" 
+        echo "get pods [after]: "
+        kubectl get pods -n default
+    
+    - name: Use kn to delete installed services 
+      #would also be possible via : kubectl delete kservice helloworld-go. But, we want to test kn...
+      run: |-
+        ./kn service delete helloworld-go
+        ./kn service delete autoscale-go
+         
+    - name: Delete GKE cluster 
+      run: |-
+        echo "list clusters:"
+        aws eks list-clusters
+        if [[ $EKS_ACTION == *"delete"* ]]
+        then
+          echo "delete cluster:"
+          eksctl delete cluster -f "./$EKS_CONFIG"
+          echo "list clusters:"
+          aws eks list-clusters
+        fi

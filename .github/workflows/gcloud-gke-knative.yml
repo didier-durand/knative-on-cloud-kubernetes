@@ -1,0 +1,263 @@
+name: Deploy Knative on GKE
+
+on:  
+
+  workflow_dispatch:
+    inputs:
+
+  push:
+    #protection to avoid triggering when other workflow is modified
+    paths: 
+    - '!.github/workflows/**'
+    - '.github/workflows/gcloud-gke-knative.yml'
+      
+  schedule:
+    - cron:  '0 1 * * FRI' 
+
+env:
+  GITHUB_REPO: 'knative-on-cloud-kubernetes-private'
+  GCP_ZONE: us-central1-c
+  GCP_VERBOSITY: warning
+  # action can contain 'create', 'delete', 'create-delete' or ''
+  GKE_ACTION: create-delete
+  GKE_CLUSTER: gke-knative-cluster
+  #KN_VERSION: v0.17.0
+  KN_VERSION: 0.17
+  
+jobs:
+  deploy-knative-on-GKE-cluster: 
+  
+    runs-on: ubuntu-latest
+
+    steps:
+        
+    - name: Checkout
+      uses: actions/checkout@v2
+
+    - name: Setup gcloud CLI
+      uses: GoogleCloudPlatform/github-actions/setup-gcloud@0.1.3
+      with:
+        project_id: ${{ secrets.GCP_PROJECT }}
+        service_account_key: ${{ secrets.GCP_SA_KEY }}
+        
+    - name: Get gcloud version & info
+      run: |-
+        echo '--- gcloud version ---'
+        gcloud version
+        echo '--- gcloud info ---'
+        gcloud info --anonymize
+             
+    - name: Cleanup old GKE cluster if needed 
+      run: |-
+        gcloud container clusters list --verbosity=$GCP_VERBOSITY --zone=$GCP_ZONE --project=${{ secrets.GCP_PROJECT }}
+        gcloud container clusters delete $GKE_CLUSTER --verbosity=$GCP_VERBOSITY --project=${{ secrets.GCP_PROJECT }} --zone=$GCP_ZONE --quiet || true
+       
+    - name: Create new GKE cluster
+      run: |-
+        if [[ $GKE_ACTION == *"create"* ]]
+        then
+          gcloud container clusters create $GKE_CLUSTER \
+            --addons=HorizontalPodAutoscaling,HttpLoadBalancing \
+            --enable-autoscaling \
+            --min-nodes=1 \
+            --max-nodes=10 \
+            --machine-type=n1-standard-4 \
+            --cluster-version=latest \
+            --enable-stackdriver-kubernetes \
+            --enable-ip-alias \
+            --enable-autorepair \
+            --zone $GCP_ZONE \
+            --verbosity=$GCP_VERBOSITY \
+            --project=${{ secrets.GCP_PROJECT }}
+          gcloud container clusters list --verbosity=$GCP_VERBOSITY --zone=$GCP_ZONE --project=${{ secrets.GCP_PROJECT }} 
+        fi
+        gcloud container clusters list --verbosity=$GCP_VERBOSITY --project=${{ secrets.GCP_PROJECT }}
+                           
+    - name: Get the GKE credentials to be used with kubectl
+      run: |-
+        gcloud container clusters get-credentials $GKE_CLUSTER --zone $GCP_ZONE
+        
+    - name: Get version via kubectl
+      run: |-
+        kubectl version
+        
+    - name: Install Istio Operator via istioctl
+      run: |-
+        echo "create ns istio-system" 
+        kubectl create ns istio-system
+        curl -L https://istio.io/downloadIstio | ISTIO_VERSION=1.7.0 sh -
+        export PATH="$PATH:/home/runner/work/$GITHUB_REPO/$GITHUB_REPO/istio-1.7.0/bin"
+        echo "istioctl version: $(istioctl version --remote=false)"
+        istioctl operator init
+        echo "apply istio-operator.yaml" 
+        kubectl apply -f istio/istio-operator.yaml
+        # wait a bit for istio services to come up...
+        sleep 60s
+        # check proper install
+        echo "istio services:" 
+        kubectl get services -n istio-system
+        kubectl get services -n istio-system | (grep 'istio-ingressgateway.*LoadBalancer' && echo 'servicei stio-ingressgateway ok')
+        kubectl get services -n istio-system | (grep 'istiod.*ClusterIP' && echo 'service istiod ok')
+        kubectl get services -n istio-system | ((wc -l | grep 3) && echo 'no unexpected service')
+        echo "istio pods:" 
+        kubectl get pods -n istio-system
+        kubectl get pods -n istio-system | (grep 'istio-ingressgateway.*Running' && echo 'pod istio-ingressgateway ok')
+        kubectl get pods -n istio-system | (grep 'istiod.*Running' && echo 'pod istiod ok')
+        kubectl get pods -n istio-system | ((wc -l | grep 3) && echo 'no unexpected pod')
+       
+    # https://knative.dev/docs/install/index.html
+    - name: Install the Custom Resource Definitions for Knative Serving features
+      run: |-
+        kubectl apply --filename https://github.com/knative/serving/releases/download/v$KN_VERSION.0/serving-crds.yaml
+        
+    - name: Install the core components for Knative Serving features
+      run: |-
+        kubectl apply --filename https://github.com/knative/serving/releases/download/v$KN_VERSION.0/serving-core.yaml
+        
+    - name: Install the Knative istio gatewway & add xip.io DNS for interactions with deployed workloads from public internet
+      run: |-
+        # some wait is needed or controller install may fail
+        sleep 60s
+        #
+        echo "kubectl get namespaces: "
+        kubectl get namespaces
+        echo "kubectl api resources: "
+        kubectl api-resources
+        echo "kubectl apply net-istio version: "
+        kubectl apply --filename https://github.com/knative/net-istio/releases/download/v$KN_VERSION.0/release.yaml
+        #install xip.io
+        kubectl apply --filename https://github.com/knative/serving/releases/download/v$KN_VERSION.0/serving-default-domain.yaml
+        
+    - name: Install knative client (kn)
+      run: |-
+        curl --output kn https://storage.googleapis.com/knative-nightly/client/latest/kn-linux-amd64
+        chmod ugo+x kn
+        
+    - name: Check if knative is running properly
+      run: |-
+        # wait a bit for knative to come up fully...
+        sleep 60s
+        #check presence of expected namespace knative-serving
+        kubectl get namespaces | grep 'knative-serving'
+        #check presence of expected services in namespace knative-serving
+        echo "kubectl get services -n knative-serving: "  
+        kubectl get services -n knative-serving
+        kubectl get services -n knative-serving | (grep 'activator-service.*ClusterIP' && echo 'activator-service ok')
+        kubectl get services -n knative-serving | (grep 'autoscaler.*ClusterIP' && echo 'autoscaler ok')
+        kubectl get services -n knative-serving | (grep 'controller.*ClusterIP' && echo 'controller ok')
+        kubectl get services -n knative-serving | (grep 'istio-webhook.*ClusterIP' && echo 'istio-webhook ok')
+        kubectl get services -n knative-serving | (grep 'webhook.*ClusterIP' && echo 'webhook ok')
+        kubectl get services -n knative-serving | (grep 'default-domain-service.*ClusterIP' && echo 'deault-domain-service ok')
+        kubectl get services -n knative-serving | ((wc -l | grep 7) && echo 'no unexpected service')
+        #check presence of expected pods in namespace knative-serving
+        echo "kubectl get pods -n knative-serving: "
+        kubectl get pods -n knative-serving
+        kubectl get pods -n knative-serving | (grep 'activator-.*Running' && echo 'activator pod ok')
+        kubectl get pods -n knative-serving | (grep 'autoscaler-.*Running' && echo 'autoscaler pod ok')
+        kubectl get pods -n knative-serving | (grep 'controller-.*Running' && echo 'controller pod ok')
+        kubectl get pods -n knative-serving | (grep 'default-domain-.*Completed' && echo 'default-domain pod ok')
+        kubectl get pods -n knative-serving | (grep 'istio-webhook-.*Running' && echo 'istio-webhook pod ok')
+        kubectl get pods -n knative-serving | (grep 'networking-istio-.*Running' && echo 'networking-istio pod ok')
+        kubectl get pods -n knative-serving | (grep 'webhook-.*Running' && echo 'istio-webhook pod ok')
+        kubectl get pods -n knative-serving | ((wc -l | grep 8) && echo 'no unexpected pod')
+        
+    - name: Deploy helloworld-go service
+      run: |-
+        # helloworld-go
+        ./kn service delete helloworld-go || true
+        ./kn service create helloworld-go --image gcr.io/knative-samples/helloworld-go --env TARGET="Go Sample v1" 
+        echo "kn service desribe for helloworld-go: "
+        ./kn service describe helloworld-go
+        #check proper deployment
+        echo 'kubectl get services -n default: '
+        kubectl get services -n default
+        kubectl get services -n default | (grep 'helloworld-go.*ClusterIP' && echo 'helloworld-go check 1 ok')
+        kubectl get services -n default | (grep 'helloworld-go-.*ClusterIP' && echo 'helloworld-go check 2 ok')
+        kubectl get services -n default | (grep 'helloworld-go-.*private.*ClusterIP' && echo 'helloworld-go check 3 ok')
+        kubectl get services -n default | (grep 'helloworld-go' | wc -l | grep 3 && echo 'no expected service for helloworld-go')
+        #autoscale-go
+        kubectl delete -f https://raw.githubusercontent.com/knative/docs/release-$KN_VERSION/docs/serving/autoscaling/autoscale-go/service.yaml || true
+        kubectl apply -f https://raw.githubusercontent.com/knative/docs/release-$KN_VERSION/docs/serving/autoscaling/autoscale-go/service.yaml
+        echo "kn service desribe for autoscale-go: "
+        ./kn service describe autoscale-go
+        #check proper deployment
+        echo "kubectl get services -n default: "
+        kubectl get services -n default
+        kubectl get services -n default | (grep 'autoscale-go-.*ClusterIP' && echo 'autoscale-go check 1 ok')
+        kubectl get services -n default | (grep 'autoscale-go-.*private.*ClusterIP' && echo 'autoscale-go check 2 ok')
+        kubectl get services -n default | (grep 'autoscale-go' | wc -l | grep 2 && echo 'no expected service for autoscale-go')
+        
+    - name: Grant (wide...) auths
+      run: |-  
+        kubectl create clusterrolebinding anonymous-cluster-admin-binding --clusterrole=cluster-admin --user=system:anonymous || true
+    
+    - name: Unit test for services
+      run: |- 
+        # some time may be needed to propagate new DNS entries
+        sleep 30s 
+        #
+        export SERVICE_URL=$(kubectl get ksvc helloworld-go | grep helloworld-go | awk '{print $2}')
+        echo "service url: $SERVICE_URL"
+        export SERVICE_DNS=$(echo "$SERVICE_URL" | sed -e 's/^http:\/\///g' -e 's/^https:\/\///g')
+        echo "service dns: $SERVICE_DNS"
+        while [[ $(nslookup "$SERVICE_DNS") == *'NXDOMAIN'* ]]
+        do
+          echo "sleep 5s for nslookup |$SERVICE_DNS|"
+          sleep 5s
+        done
+        nslookup "$SERVICE_DNS"
+        curl --insecure "$SERVICE_URL"
+        #
+        export SERVICE_URL=$(kubectl get ksvc autoscale-go | grep autoscale-go | awk '{print $2}')
+        echo "service url: $SERVICE_URL"
+        export SERVICE_DNS=$(echo $SERVICE_URL | sed -e 's/^http:\/\///g' -e 's/^https:\/\///g')
+        echo "service dns: $SERVICE_DNS"
+        while [[ $(nslookup "$SERVICE_DNS") == *'NXDOMAIN'* ]]
+        do
+          echo "sleep 5s for nslookup |$SERVICE_DNS|"
+          sleep 5s
+        done
+        nslookup "$SERVICE_DNS"
+        curl --insecure "$SERVICE_URL/sleep=10&prime=100&bloat=1"
+    
+    - name: Install hey 
+      run: |-
+        curl --output hey https://storage.googleapis.com/hey-release/hey_linux_amd64
+        chmod ugo+x ./hey
+        
+    - name: Run helloworld-go with max throughput via hey
+      run: |-
+        export SERVICE_URL=$(kubectl get ksvc helloworld-go | grep helloworld-go | awk '{print $2}')
+        echo "get pods [before]: "
+        kubectl get pods -n default
+        echo "service url: $SERVICE_URL"
+        echo "run hey:"
+        ./hey -n 200000 "$SERVICE_URL" 
+        echo "get pods [after]: "
+        kubectl get pods -n default
+        
+    - name: Activate Knative autoscaling for autoscale-go via hey
+      run: |-
+        export SERVICE_URL=$(kubectl get ksvc autoscale-go | grep autoscale-go | awk '{print $2}')
+        echo "get pods [before]: "
+        kubectl get pods -n default
+        echo "service url: $SERVICE_URL"
+        echo "run hey:"
+        ./hey -z 90s -q 350 "$SERVICE_URL?sleep=100&prime=10000&bloat=5" 
+        echo "get pods [after]: "
+        kubectl get pods -n default
+    
+    - name: Use kn to delete installed services 
+      # would also be possible via : kubectl delete kservice helloworld-go. But, we want to test kn...
+      run: |-
+        ./kn service delete helloworld-go
+        ./kn service delete autoscale-go
+         
+    - name: Delete GKE cluster 
+      run: |-
+        if [[ $GKE_ACTION == *"delete"* ]]
+        then
+          gcloud container clusters delete $GKE_CLUSTER --verbosity=$GCP_VERBOSITY --project=${{ secrets.GCP_PROJECT }} --zone=$GCP_ZONE --quiet
+        fi
+        gcloud container clusters list --verbosity=$GCP_VERBOSITY --project=${{ secrets.GCP_PROJECT }}
+        

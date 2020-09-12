@@ -1,0 +1,8 @@
+#source: https://istio.io/latest/docs/setup/install/operator/
+apiVersion: install.istio.io/v1alpha1
+kind: IstioOperator
+metadata:
+  namespace: istio-system
+  name: default-istiocontrolplane
+spec:
+  profile: default

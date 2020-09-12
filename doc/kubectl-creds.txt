@@ -1,0 +1,21 @@
+Commands:
+======== 
+ 
+gcloud container clusters get-credentials gke-knative-cluster --zone us-central1-c --project gcp-workflows-on-github
+kubectl create clusterrolebinding anonymous-cluster-admin-binding --clusterrole=cluster-admin --user=system:anonymous
+curl --insecure "$(TERM=dumb kubectl cluster-info | grep 'Kubernetes master' | awk '{ print $6 }')/api/v1/namespaces/default/services/helloworld-go/proxy"
+curl $(kubectl get ksvc helloworld-go | grep helloworld-go | awk '{print $2}')
+# resp: Hello Go Sample v1!
+curl --header 'X-ECHO-BODY: amazing' $(kubectl get ksvc ealen-echo-server | grep ealen-echo-server | awk '{print $2}') 
+# resp: "amazing"
+
+# https://kubernetes.io/docs/tasks/administer-cluster/access-cluster-services/
+# kubectl cluster-info | grep 'Kubernetes master' | awk '{ print $6 }' 
+
+#h ttps://35.193.86.224/api/v1/namespaces/default/services/ealen-echo-server/proxy
+
+# curl --insecure https://35.193.86.224/api/v1/namespaces/default/services/helloworld-go
+
+# credentials: https://kubernetes.io/docs/reference/access-authn-authz/rbac/#kubectl-create-clusterrolebinding
+# https://stackoverflow.com/questions/60324528/services-is-forbidden-user-systemserviceaccounttickexternal-dns-cannot
+# kubectl create clusterrolebinding anonymous-cluster-admin-binding --clusterrole=cluster-admin --user=system:anonymous
