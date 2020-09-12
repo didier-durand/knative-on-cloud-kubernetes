@@ -1,4 +1,4 @@
-# Knative Serving deployed on cloud-based Kubernetes
+# Knative Serving on cloud-based Kubernetes
 
 <img src="https://github.com/didier-durand/knative-on-cloud-kubernetes/blob/master/img/knative-k8s-istio-logos.jpg" height="160">
 
