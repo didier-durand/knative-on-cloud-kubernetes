@@ -62,7 +62,7 @@ citizen.
 
 ## Autoscaling with Knative 
 
-Section "Scalability test" below demonstrates the automated scaling delivered as a core feature of Knative: the  autoscaing algorithm is detailled 
+Section "Scalability test" below demonstrates the automated scaling delivered as a core feature of Knative: the  autoscaing algorithm is detailed 
 on [Knative Autoscaling page](https://knative.dev/v0.15-docs/serving/samples/autoscale-go/#algorithm) and [Knative Serving Autoscaling System](https://github.com/knative/serving/blob/master/docs/scaling/SYSTEM.md). 
 The initial *'kubectl get pods -n default'* 
 demonstrates that the workload containers for autoscale-go was scaled down to zero due to initial inactivity. 
