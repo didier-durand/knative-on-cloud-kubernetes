@@ -5,9 +5,9 @@
 ![workflow badge](https://github.com/didier-durand/knative-on-cloud-kubernetes/workflows/Deploy%20Knative%20on%20GKE/badge.svg)
 ![workflow badge](https://github.com/didier-durand/knative-on-cloud-kubernetes/workflows/Deploy%20Knative%20on%20EKS/badge.svg)
 
-This repository can be re-used in subsequent projects as the initial stage of a live test bed to leverage the added values of 
+This repository can be re-used in subsequent projects as the initial stage of a live test bed to leverage the feaures of 
 [Knative project](https://knative.dev/) (sponsored by Google) for serverless workloads: it is implemented on Google Cloud Platform (GCP) and Amazon Web Services (AWS)
-via a fully automated Github workflow (see files [gcloud-gke-knative.yml](https://github.com/didier-durand/knative-on-cloud-kubernetes/blob/master/.github/workflows/gcloud-gke-knative.yml) 
+via a fully automated Github workflows (see files [gcloud-gke-knative.yml](https://github.com/didier-durand/knative-on-cloud-kubernetes/blob/master/.github/workflows/gcloud-gke-knative.yml) 
 and [aws-eks-knative.yml](https://github.com/didier-durand/knative-on-cloud-kubernetes/blob/master/.github/workflows/aws-eks-knative.yml))
 
 This workflow creates a standard Kubernetes cluster on the cloud (either [Google Kubernetes Engine - GKE](https://cloud.google.com/kubernetes-engine) 
