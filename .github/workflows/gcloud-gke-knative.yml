@@ -15,7 +15,7 @@ on:
     - cron:  '0 1 * * FRI' 
 
 env:
-  GITHUB_REPO: 'knative-on-cloud-kubernetes-private'
+  GITHUB_REPO: 'knative-on-cloud-kubernetes'
   GCP_ZONE: us-central1-c
   GCP_VERBOSITY: warning
   # action can contain 'create', 'delete', 'create-delete' or ''
