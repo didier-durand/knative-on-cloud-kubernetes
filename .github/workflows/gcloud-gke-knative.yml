@@ -196,7 +196,8 @@ jobs:
         # some time may be needed to propagate new DNS entries annd IP adresses
         sleep 60s 
         #
-        export SERVICE_URL=$(kubectl get ksvc helloworld-go | grep helloworld-go | awk '{print $2}')
+        kubectl get ksvc helloworld-go | grep -m  1 helloworld-go
+        export SERVICE_URL=$(kubectl get ksvc helloworld-go | grep -m 1 helloworld-go | awk '{print $2}')
         echo "service url: $SERVICE_URL"
         export SERVICE_DNS=$(echo "$SERVICE_URL" | sed -e 's/^http:\/\///g' -e 's/^https:\/\///g')
         echo "service dns: $SERVICE_DNS"
@@ -208,7 +209,8 @@ jobs:
         nslookup "$SERVICE_DNS"
         curl --insecure "$SERVICE_URL"
         #
-        export SERVICE_URL=$(kubectl get ksvc autoscale-go | grep autoscale-go | awk '{print $2}')
+        kubectl get ksvc autoscale-go | grep -m 1 autoscale-go
+        export SERVICE_URL=$(kubectl get ksvc autoscale-go | grep -m 1 autoscale-go | awk '{print $2}')
         echo "service url: $SERVICE_URL"
         export SERVICE_DNS=$(echo $SERVICE_URL | sed -e 's/^http:\/\///g' -e 's/^https:\/\///g')
         echo "service dns: $SERVICE_DNS"
@@ -227,7 +229,8 @@ jobs:
         
     - name: Run helloworld-go with max throughput via hey
       run: |-
-        export SERVICE_URL=$(kubectl get ksvc helloworld-go | grep helloworld-go | awk '{print $2}')
+        kubectl get ksvc helloworld-go | grep -m 1 helloworld-go
+        export SERVICE_URL=$(kubectl get ksvc helloworld-go | grep -m 1 helloworld-go | awk '{print $2}')
         echo "get pods [before]: "
         kubectl get pods -n default
         echo "service url: $SERVICE_URL"
@@ -238,7 +241,8 @@ jobs:
         
     - name: Activate Knative autoscaling for autoscale-go via hey
       run: |-
-        export SERVICE_URL=$(kubectl get ksvc autoscale-go | grep autoscale-go | awk '{print $2}')
+        kubectl get ksvc autoscale-go | grep -m 1 autoscale-go
+        export SERVICE_URL=$(kubectl get ksvc autoscale-go | grep -m 1 autoscale-go | awk '{print $2}')
         echo "get pods [before]: "
         kubectl get pods -n default
         echo "service url: $SERVICE_URL"
