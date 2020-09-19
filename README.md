@@ -40,13 +40,12 @@ implementation is desired.
 
 ## Why Knative ?
 
-<p align="center"><img src="img/application/online-boutique-architecture.png" height="300"></p>
 
 As said above, Knative, OSS project sponsored by Google is implemented on GCP as service [Cloud Run](https://cloud.google.com/run) and integrated 
 with the other services (logging, monitoring, iam, etc.) of the platform. It is very easy to use: check out "Deploy to Cloud Run" of our other 
 repository collating GitHub-based CI/CD workflows.
 
-<p align="center"><img src="img/Knative-Serving-architecture.jpg" height="300"></p>
+<p align="center"><img src="img/Knative-Serving-architecture.jpg" height="450"></p>
 
 But, if your workloads run elsewhere (on premise, other public cloud, etc.) or if you desire to avoid lock-in with a specific vendor and you still 
 want to enjoy the benefits of serverless: the Serving block (see its archiecture in Figure 1 - source: [N. Kaviani & al](https://www.researchgate.net/publication/336567672_Towards_Serverless_as_Commodity_a_case_of_Knative)) 
